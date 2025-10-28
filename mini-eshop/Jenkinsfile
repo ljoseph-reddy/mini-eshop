@@ -1,0 +1,66 @@
+pipeline {
+  agent any
+
+  environment {
+    IMAGE_NAME = 'mini-eshop'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Install') {
+      steps {
+        sh 'npm ci'
+      }
+    }
+
+    stage('Lint') {
+      steps {
+        sh 'npm run lint || true' // keep beginner-friendly; not failing the build here
+      }
+    }
+
+    stage('Test') {
+      steps {
+        sh 'npm test -- --ci --colors'
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        script {
+          def tag = "${env.BUILD_NUMBER}"
+          sh "docker build -t $IMAGE_NAME:${tag} ."
+          sh "docker tag $IMAGE_NAME:${tag} $IMAGE_NAME:latest"
+        }
+      }
+    }
+
+    stage('Push Image') {
+      when { branch 'main' }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-dh-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+          sh 'echo $DH_PASS | docker login -u $DH_USER --password-stdin'
+          sh 'docker tag mini-eshop:latest $DH_USER/mini-eshop:latest'
+          sh 'docker push $DH_USER/mini-eshop:latest'
+        }
+      }
+    }
+
+    stage('Deploy') {
+      when { branch 'main' }
+      steps {
+        sh 'docker rm -f mini-eshop || true'
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-dh-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+          sh 'docker run -d --name mini-eshop -p 8080:8080 $DH_USER/mini-eshop:latest'
+        }
+      }
+    }
+  }
+}
+
+
